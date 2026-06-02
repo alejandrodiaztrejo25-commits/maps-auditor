@@ -1,0 +1,5 @@
+STREAMING_CHUNK: Definiendo librerías para el despliegue...
+
+google-genai
+reportlab
+streamlit
