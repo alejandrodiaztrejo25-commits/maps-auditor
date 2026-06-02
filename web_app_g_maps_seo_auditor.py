@@ -3,194 +3,98 @@ import io
 import datetime
 import streamlit as st
 
-# Intentar importar la nueva librería de Gemini de Google de forma segura
+# Intentar cargar librerías con manejo de errores limpio
 try:
     from google import genai
-    USING_NEW_SDK = True
+    from google.genai import errors
 except ImportError:
-    try:
-        import google.generativeai as genai_legacy
-        USING_NEW_SDK = False
-    except ImportError:
-        st.error("Por favor, instala la dependencia ejecutando: pip install google-genai reportlab streamlit")
-        st.stop()
+    st.error("Falta la librería 'google-genai'. Por favor, asegúrate de que esté en tu archivo requirements.txt.")
 
-# Importaciones requeridas para construir PDFs profesionales en ReportLab sin usar el disco local
-from reportlab.lib.pagesizes import letter
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, PageBreak
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+except ImportError:
+    st.error("Falta la librería 'reportlab'. Por favor, asegúrate de que esté en tu archivo requirements.txt.")
 
+# Configuración de página de Streamlit para Móvil y Desktop
 st.set_page_config(
-    page_title="LocalRank Consulting | G-Maps Auditor",
-    page_icon="🗺️",
+    page_title="LocalRank Consulting - G-Maps SEO Auditor",
+    page_icon="🎯",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# Estilos CSS personalizados para lograr un diseño oscuro premium, limpio y mobile-first
+# Estilos CSS personalizados para un look premium y oscuro en móviles (S23 Ultra)
 st.markdown("""
     <style>
-    .main {
-        background-color: #0B0B0F;
-        color: #F3F4F6;
-    }
-    div[data-testid="stSidebar"] {
-        background-color: #12121A;
-        border-right: 1px solid #1F2937;
-    }
-    .stButton>button {
-        border-radius: 8px;
-        transition: all 0.3s ease;
-    }
-    .stTextInput>div>div>input {
-        background-color: #1E1E2F !important;
-        color: #F3F4F6 !important;
-        border: 1px solid #1F2937 !important;
-    }
+        .reportview-container {
+            background: #0B0B0F;
+        }
+        .stButton>button {
+            border-radius: 8px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        div[data-testid="stExpander"] {
+            background-color: #12121A !important;
+            border: 1px solid #1F2937 !important;
+            border-radius: 8px !important;
+        }
+        /* Estilos específicos para unificar editores */
+        .stTextArea textarea {
+            background-color: #0C0C0F !important;
+            color: #F3F4F6 !important;
+            font-family: 'Consolas', monospace !important;
+            font-size: 14px !important;
+            border: 1px solid #1F2937 !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
-if "api_key" not in st.session_state:
-    st.session_state.api_key = ""
+# --- INICIALIZACIÓN DE VARIABLES DE SESIÓN ---
 if "reporte_auditoria" not in st.session_state:
     st.session_state.reporte_auditoria = ""
 if "reporte_entregables" not in st.session_state:
     st.session_state.reporte_entregables = ""
-if "metricas" not in st.session_state:
-    st.session_state.metricas = {}
+if "datos_negocio" not in st.session_state:
+    st.session_state.datos_negocio = {}
 
-with st.sidebar:
-    st.image("https://img.icons8.com/nolan/128/google-maps.png", width=70)
-    st.title("LocalRank Consulting")
-    st.markdown("*Optimización de Google Maps CDMX 2026*")
-    st.write("---")
-    
-    # Entrada de API Key con persistencia temporal
-    api_input = st.text_input("Gemini API Key:", value=st.session_state.api_key, type="password")
-    if api_input:
-        st.session_state.api_key = api_input
-        
-    st.info("💡 Consejo para tu S23 Ultra: Guarda esta página en tus marcadores de pantalla de inicio para abrirla como una App nativa.")
-
-st.title("🗺️ G-Maps Dual-Document Auditor")
-st.subheader("Firma Especializada en Posicionamiento Local y Conversión")
-
-# Columnas de entrada de datos adaptables (responsivas)
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    st.subheader("1. Identificación y Giro")
-    nombre_negocio = st.text_input("Nombre o Enlace del Negocio:", "Dental Center Guadalajara")
-    
-    giro_comercial = st.selectbox(
-        "Giro Comercial:",
-        [
-            "Salud (Clínicas, Consultorios, Hospitales)",
-            "Gastronomía (Restaurantes, Cafeterías, Bares)",
-            "Servicios Profesionales B2B (Corporativos, Despachos)",
-            "Ocio, Turismo y Entretenimiento (Atracciones, Hoteles)"
-        ]
-    )
-    
-    cat_principal = st.text_input("Categoría Principal en Maps:", "Clínica dental")
-    cat_secundarias = st.text_input("Subcategorías actuales (comas):", "Dentista, Ortodoncista, Implantes dentales")
-
-with col2:
-    st.subheader("2. Métricas de Mercado")
-    volumen_busquedas = st.number_input("Búsquedas Mensuales Estimadas (Zona):", min_value=1, value=1500, step=100)
-    ticket_promedio = st.number_input("Ticket Promedio del Establecimiento ($MXN):", min_value=1.0, value=1200.0, step=50.0)
-    
-    st.markdown("---")
-    st.markdown("**Fórmulas de Cálculo de Captación Local CDMX 2026**")
-    st.latex(r"I_P = V_P \times T_A \times T_C \times V_T")
-
-st.subheader("3. Lista de Verificación de Diagnóstico Local")
-tab_b1, tab_b2, tab_b3, tab_b4 = st.tabs([
-    "📂 B1: Fundamentos", "🏗️ B2: Arquitectura SEO", "💸 B3: Conversión", "⭐️ B4: Autoridad"
-])
-
-checklist_datos = {}
-
-with tab_b1:
-    checklist_datos["propiedad_ficha"] = st.radio("Propiedad de la Ficha:", ["Reclamada y Verificada", "Sin reclamar / Abandonada"], horizontal=True)
-    checklist_datos["consistencia_nap"] = st.radio("Consistencia NAP (Web/Maps):", ["Consistente", "Datos distintos en Web/Ficha"], horizontal=True)
-    checklist_datos["pin_ubicacion"] = st.radio("Pin de Ubicación:", ["Correcto (En la entrada)", "Desplazado / Incorrecto"], horizontal=True)
-    checklist_datos["horarios_reales"] = st.radio("Horarios Reales y Festivos:", ["Actualizados", "Obsoletos / Sin festivos"], horizontal=True)
-
-with tab_b2:
-    checklist_datos["cat_optimizacion"] = st.radio("Categoría Principal/Secundarias:", ["Correctas y específicas", "Muy genéricas / Erróneas / Faltantes"])
-    checklist_datos["nombre_spam"] = st.radio("Nombre Comercial Limpio:", ["Limpio y legal (Sin Spam)", "Spam / Keyword stuffing"])
-    checklist_datos["catalogo_servicios"] = st.radio("Catálogo de Servicios:", ["Completo y redactado", "Vacío / Solo títulos sin descripción"])
-
-with tab_b3:
-    checklist_datos["chat_nativo"] = st.radio("Botón de Chat Nativo:", ["Activado y ágil", "Desactivado / Abandonado"])
-    checklist_datos["contacto_rapido"] = st.radio("Enlace de Contacto Rápido:", ["Enlace optimizado", "Link roto / No tiene"])
-    checklist_datos["faqs_config"] = st.radio("Preguntas Frecuentes (FAQs):", ["Configuradas (3-5 FAQs)", "Vacío / Abandonado"])
-
-with tab_b4:
-    checklist_datos["calidad_visual"] = st.radio("Calidad Visual Reciente:", ["Actualizadas y profesionales", "Fotos viejas / De stock"])
-    checklist_datos["frecuencia_resenas"] = st.radio("Frecuencia de Reseñas:", ["Flujo constante activo", "Sin reseñas recientes / Estancado"])
-    checklist_datos["seo_respuestas"] = st.radio("SEO en Respuestas de Reseñas:", ["Respuestas con SEO local", "\"Gracias\" plano / Sin responder"])
-    checklist_datos["gestion_crisis"] = st.radio("Gestión de Crisis (1 Estrella):", ["Gestión profesional y comercial", "Respuestas reactivas / Ignoradas"])
-
-col_f1, col_f2 = st.columns([1, 1])
-
-with col_f1:
-    st.markdown("#### Inventario Cuantitativo de Fotos")
-    foto_interior = st.number_input("Fotos de Interior:", min_value=0, value=5)
-    foto_exterior = st.number_input("Fotos de Exterior:", min_value=0, value=2)
-    foto_equipo = st.number_input("Fotos de Equipo/Personal:", min_value=0, value=0)
-    foto_productos = st.number_input("Fotos de Productos/Servicios:", min_value=0, value=12)
-    foto_logo = st.number_input("Logo y Portada (0 o 1):", min_value=0, max_value=1, value=1)
-    
-    total_fotos = {
-        "interior": foto_interior,
-        "exterior": foto_exterior,
-        "equipo": foto_equipo,
-        "productos": foto_productos,
-        "logo_portada": foto_logo
-    }
-
-with col_f2:
-    st.markdown("#### Textos Existentes del Perfil")
-    desc_actual = st.text_area("Descripción actual del perfil (dejar vacío si no tiene):", "")
-    servicios_actual = st.text_area("Servicios/Atributos listados actualmente:", "")
-    resenas_actual = st.text_area("Opiniones Recientes para Análisis Semántico:", "Cliente 1: Excelente servicio, el dentista fue muy paciente con mi tratamiento de ortodoncia.\nCliente 2: Buena atención pero tardaron un poco en atenderme a pesar de tener cita.")
-
-def calcular_metricas_locales():
+# --- LÓGICA DE CÁLCULO CIENTÍFICO ---
+def calcular_metricas(checklist, fotos, búsquedas, ticket):
     score_gbp = 0
-    if checklist_datos["propiedad_ficha"] == "Reclamada y Verificada": score_gbp += 8
-    if checklist_datos["pin_ubicacion"] == "Correcto (En la entrada)": score_gbp += 8
-    if checklist_datos["horarios_reales"] == "Actualizados": score_gbp += 6
-    if checklist_datos["cat_optimizacion"] == "Correctas y específicas": score_gbp += 8
-    if checklist_datos["nombre_spam"] == "Limpio y legal (Sin Spam)": score_gbp += 6
+    if checklist["propiedad"] == "Reclamada y Verificada": score_gbp += 8
+    if checklist["pin"] == "Correcto (En la entrada)": score_gbp += 8
+    if checklist["horarios"] == "Actualizados": score_gbp += 6
+    if checklist["categoria"] == "Correctas y específicas": score_gbp += 8
+    if checklist["nombre"] == "Limpio y legal (Sin Spam)": score_gbp += 6
     
-    score_onpage = 0
-    if checklist_datos["consistencia_nap"] == "Consistente": score_onpage += 16
+    score_onpage = 16 if checklist["nap"] == "Consistente" else 0
     
     score_resenas = 0
-    if checklist_datos["frecuencia_resenas"] == "Flujo constante activo": score_resenas += 5
-    if checklist_datos["seo_respuestas"] == "Respuestas con SEO local": score_resenas += 5
-    if checklist_datos["gestion_crisis"] == "Gestión profesional y comercial": score_resenas += 5
+    if checklist["frecuencia"] == "Flujo constante activo": score_resenas += 5
+    if checklist["seo_respuestas"] == "Respuestas con SEO local": score_resenas += 5
+    if checklist["crisis"] == "Gestión profesional y comercial": score_resenas += 5
     
     score_comportamiento = 0
-    if checklist_datos["chat_nativo"] == "Activado y ágil": score_comportamiento += 2
-    if checklist_datos["contacto_rapido"] == "Enlace optimizado": score_comportamiento += 3
-    if checklist_datos["faqs_config"] == "Configuradas (3-5 FAQs)": score_comportamiento += 2
+    if checklist["chat"] == "Activado y ágil": score_comportamiento += 2
+    if checklist["contacto"] == "Enlace optimizado": score_comportamiento += 3
+    if checklist["faqs"] == "Configuradas (3-5 FAQs)": score_comportamiento += 2
     
     score_fotos = 0
-    tf = sum(total_fotos.values())
-    if tf >= 50: score_fotos += 13
-    elif tf >= 20: score_fotos += 8
+    total_fotos = sum(fotos.values())
+    if total_fotos >= 50: score_fotos += 13
+    elif total_fotos >= 20: score_fotos += 8
     else: score_fotos += 3
     
     score_total = score_gbp + score_onpage + score_resenas + score_comportamiento + score_fotos
     
-    tc = 0.30 # Tasa de conversión transaccional local 30%
-    ingresos_optimo = volumen_busquedas * 0.06 * tc * ticket_promedio
-    ingresos_actuales = volumen_busquedas * 0.015 * tc * ticket_promedio
+    # Ecuación de Costo de Inacción
+    tc = 0.30  # Conversión en México
+    ingresos_optimo = búsquedas * 0.06 * tc * ticket
+    ingresos_actuales = búsquedas * 0.015 * tc * ticket
     fuga_mensual = ingresos_optimo - ingresos_actuales
     
     if score_total < 45:
@@ -213,130 +117,8 @@ def calcular_metricas_locales():
         "plan_recomendado": plan_rec
     }
 
-def ejecutar_consulta_ia(tipo):
-    if not st.session_state.api_key:
-        st.error("Por favor, ingresa tu Gemini API Key en el panel lateral.")
-        return
-
-    st.session_state.metricas = calcular_metricas_locales()
-    metricas = st.session_state.metricas
-    
-    prompt_diagnostico = "\n".join([f"- {k.replace('_', ' ').title()}: {v}" for k, v in checklist_datos.items()])
-
-    if tipo == "auditoria":
-        prompt = f"""
-Actúa como un Consultor de SEO Local Senior y Socio Director de la firma 'LocalRank Consulting'.
-Redacta un informe de Diagnóstico de Visibilidad Comercial para el negocio '{nombre_negocio}' (Giro: {giro_comercial}).
-
-REGLA DE NEGOCIO: No entregues NINGÚN activo copiable de inmediato (no redactes descripciones completas, ni FAQs completas, ni respuestas exactas). Esto es preventa. El cliente debe pagar para obtener las soluciones exactas. Limítate a auditar, justificar y demostrar la pérdida económica por inacción.
-
-DATOS:
-- Nombre: {nombre_negocio}
-- Categoría Principal: {cat_principal}
-- Categorías Secundarias: {cat_secundarias}
-- Descripción Actual: {desc_actual}
-- Servicios Actuales: {servicios_actual}
-
-MÉTRICAS CLAVE GENERADAS POR LA APP:
-- Score de Optimización Moz Local: {metricas['score']}/100 
-  (Breakdown: GBP {metricas['score_gbp']}%, Web On-Page {metricas['score_onpage']}%, Reseñas {metricas['score_resenas']}%, Comportamiento {metricas['score_behavior']}%, Fotos {metricas['score_photos']}%)
-- Costo de la Inacción Financiera Calculado:
-  * Ingreso Máximo Potencial (6.0% CTR): ${metricas['ingresos_optimo']:,} MXN.
-  * Ingreso Actual Capturado (1.5% CTR): ${metricas['ingresos_actuales']:,} MXN.
-  * FUGA DE DINERO MENSUAL: ${metricas['fuga_mensual']:,} MXN.
-- Plan Comercial Recomendado por Score: {metricas['plan_recomendado']}
-
-ESTADO DE CHECKLIST:
-{prompt_diagnostico}
-
------------------
-CONSTRUYE EL INFORME DE PREVENTA CON LAS SIGUIENTES SECCIONES.
-Usa los títulos idénticos marcados con 'Sección X:' para permitir la segmentación automática del PDF.
-
-Sección 1: Resumen Ejecutivo y Diagnóstico Global
-- Presenta el diagnóstico formal de la firma LocalRank Consulting.
-- Expone de forma profesional el Score de Optimización de {metricas['score']}/100. Desglosa los pilares.
-
-Sección 2: El Costo de la Inacción (Pérdida Financiera)
-- Explica de forma comercial la ecuación de ingresos para Google Maps en México: IP = VP * TA * TC * VT.
-- Demuestra que operar con un perfil desoptimizado causa una fuga mensual de ${metricas['fuga_mensual']:,} MXN.
-
-Sección 3: Auditoría y Gaps de Relevancia (Categorías)
-- Valida la categoría principal '{cat_principal}'. Lista 5 subcategorías ideales para este nicho.
-
-Sección 4: Diagnóstico Visual e Inventario de Fotos
-- Analiza las fotos declaradas. Explica el beneficio de tener imágenes reales frente a fotos de stock.
-
-Sección 5: Fugas Conversionales y Canales de Tráfico
-- Analiza las deficiencias detectadas en los canales activos de contacto (Chat, WhatsApp, FAQs abandonadas).
-
-Sección 6: Propuesta de Solución LocalRank Consulting
-- Despliega formalmente la cotización de servicios de Alejandro Trejo.
-- Presenta de forma atractiva los planes y argumenta firmemente por qué el '{metricas['plan_recomendado']}' es el ideal.
-"""
-    else:
-        prompt = f"""
-Actúa como un Consultor de SEO Local Senior de 'LocalRank Consulting'.
-Redacta el Dossier Técnico de Entregables de Implementación para el negocio '{nombre_negocio}' (Giro: {giro_comercial}). Este es un documento puramente operativo posventa.
-
-Debes entregar las soluciones exactas optimizadas de forma directa, listas para copiar e implementar en la ficha.
-
-DATOS:
-- Nombre: {nombre_negocio}
-- Categoría Principal: {cat_principal}
-- Categorías Secundarias: {cat_secundarias}
-- Opiniones de clientes: {resenas_actual}
-
------------------
-CONSTRUYE EL INFORME DE POSVENTA CON LAS SIGUIENTES SECCIONES.
-Usa los títulos idénticos marcados con 'Sección X:' para permitir la segmentación automática del PDF.
-
-Sección 1: Propuesta de Descripción de Alta Conversión
-- Redacta una descripción comercial nueva de hasta 750 caracteres, con categoría principal e indicaciones locales fluidas en los primeros 150 caracteres.
-
-Sección 2: Plan Técnico de Fotos Prioritarias
-- Detalla 5 tomas fotográficas estratégicas que deben realizarse y subirse de inmediato.
-
-Sección 3: Enlaces de Conversión Activa y WhatsApp
-- Genera el mensaje parametrizado ideal para el enlace de WhatsApp que dispare la intención de compra.
-
-Sección 4: Despliegue de Preguntas Frecuentes (FAQs) Nativas
-- Redacta exactamente 3 FAQs optimizadas con palabras clave secundarias, listas para ser cargadas.
-
-Sección 5: Módulo de Respuestas de Reseñas (10 Plantillas SEO)
-- Genera exactamente 10 respuestas modelo hiper-optimizadas con SEO local (5 positivas de 5 estrellas, 3 de contención de crisis de 1 estrella, 2 de información neutral).
-
-Sección 6: Script de Captación Automatizada de Opiniones
-- Script de texto exacto para WhatsApp o Correo para incentivar el flujo recurrente de opiniones de 5 estrellas.
-
-Sección 7: Guía Técnica de Integración Conversacional y Citas
-- Detalla la guía técnica de configuración de agenda automatizada (TidyCal o similar), buffers y recordatorios.
-"""
-
-    with st.spinner("Procesando con Gemini AI..."):
-        try:
-            if USING_NEW_SDK:
-                client = genai.Client(api_key=st.session_state.api_key)
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=prompt
-                )
-                resultado = response.text
-            else:
-                genai_legacy.configure(api_key=st.session_state.api_key)
-                model = genai_legacy.GenerativeModel("gemini-2.5-flash")
-                response = model.generate_content(prompt)
-                resultado = response.text
-                
-            if tipo == "auditoria":
-                st.session_state.reporte_auditoria = resultado
-            else:
-                st.session_state.reporte_entregables = resultado
-            st.success("¡Contenido de la IA generado exitosamente!")
-        except Exception as e:
-            st.error(f"Error al contactar con la IA: {e}")
-
-def generar_pdf_bytes(texto_contenido, tipo):
+# --- DISEÑO DEL PDF CORPORATIVO ---
+def generar_pdf_bytes(texto_contenido, datos_negocio, tipo):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -347,30 +129,43 @@ def generar_pdf_bytes(texto_contenido, tipo):
         bottomMargin=50
     )
     
-    # Colores corporativos según tipo de documento
     if tipo == "auditoria":
-        primary_color = colors.HexColor("#1E3A8A")   # Azul marino elegante
-        secondary_color = colors.HexColor("#DC2626") # Rojo de advertencia/pérdida
+        primary_color = colors.HexColor("#1E3A8A")
+        secondary_color = colors.HexColor("#DC2626")
+        doc_titulo = "PLAN DE OPTIMIZACIÓN ALGORÍTMICA Y CAPTACIÓN LOCAL"
+        doc_subtitulo = "Auditoría de Visibilidad Comercial y Costo de la Inacción (Preventa)"
     else:
-        primary_color = colors.HexColor("#111827")   # Carbón elegante
-        secondary_color = colors.HexColor("#059669") # Verde de solución
-        
+        primary_color = colors.HexColor("#111827")
+        secondary_color = colors.HexColor("#059669")
+        doc_titulo = "PLAN DE IMPLEMENTACIÓN Y ENTREGABLES OPERATIVOS"
+        doc_subtitulo = "Dossier de Activos Técnicos Listos para Integración Directa (Posventa)"
+
     text_dark = colors.HexColor("#1F2937")
     border_light = colors.HexColor("#E5E7EB")
     bg_panel = colors.HexColor("#F9FAFB")
 
     styles = getSampleStyleSheet()
     
-    # Configuración de estilos tipográficos para PDF
     title_style = ParagraphStyle(
         'ReportTitle',
         parent=styles['Heading1'],
         fontName='Helvetica-Bold',
-        fontSize=20,
-        leading=24,
+        fontSize=22,
+        leading=26,
         textColor=primary_color,
         alignment=TA_CENTER,
         spaceAfter=5
+    )
+    
+    subtitle_style = ParagraphStyle(
+        'ReportSubtitle',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=11,
+        leading=14,
+        textColor=colors.HexColor("#4B5563"),
+        alignment=TA_CENTER,
+        spaceAfter=25
     )
     
     section_heading = ParagraphStyle(
@@ -426,44 +221,36 @@ def generar_pdf_bytes(texto_contenido, tipo):
 
     story = []
 
-    # --- PORTADA DE ALTA GAMA ---
-    story.append(Spacer(1, 30))
-    story.append(Paragraph("LOCALRANK CONSULTING", ParagraphStyle('PortLogo', fontName='Helvetica-Bold', fontSize=14, textColor=secondary_color, alignment=TA_CENTER, spaceAfter=20)))
+    # Portada Elegante
     story.append(Spacer(1, 40))
-    
-    if tipo == "auditoria":
-        doc_titulo = "PLAN DE OPTIMIZACIÓN ALGORÍTMICA Y CAPTACIÓN LOCAL"
-        doc_subtitulo = "Auditoría de Visibilidad Comercial y Costo de la Inacción (Preventa)"
-    else:
-        doc_titulo = "PLAN DE IMPLEMENTACIÓN Y ENTREGABLES OPERATIVOS"
-        doc_subtitulo = "Dossier de Activos Técnicos Listos para Integración Directa (Posventa)"
-
-    story.append(Paragraph(doc_titulo, ParagraphStyle('PortTitle', fontName='Helvetica-Bold', fontSize=22, leading=26, textColor=primary_color, alignment=TA_CENTER, spaceAfter=10)))
+    story.append(Paragraph("LOCALRANK CONSULTING", ParagraphStyle('PortLogo', fontName='Helvetica-Bold', fontSize=14, textColor=secondary_color, alignment=TA_CENTER, spaceAfter=20)))
+    story.append(Spacer(1, 60))
+    story.append(Paragraph(doc_titulo, ParagraphStyle('PortTitle', fontName='Helvetica-Bold', fontSize=24, leading=28, textColor=primary_color, alignment=TA_CENTER, spaceAfter=10)))
     story.append(Paragraph(doc_subtitulo, ParagraphStyle('PortSub', fontName='Helvetica', fontSize=12, leading=15, textColor=colors.HexColor("#4B5563"), alignment=TA_CENTER)))
-    story.append(Spacer(1, 80))
+    story.append(Spacer(1, 100))
     
-    # Metadatos del Negocio
-    datos = st.session_state.get("metricas", {})
     fecha_actual = datetime.datetime.now().strftime("%d de %B de %Y")
+    fotos_info = f"Interior: {datos_negocio['fotos']['interior']} | Exterior: {datos_negocio['fotos']['exterior']} | Equipo: {datos_negocio['fotos']['equipo']} | Prod/Serv: {datos_negocio['fotos']['productos']} | Logo: {datos_negocio['fotos']['logo_portada']}"
     
     if tipo == "auditoria":
         tabla_portada_data = [
-            [Paragraph("PREPARADO PARA:", meta_label_style), Paragraph(nombre_negocio, meta_val_style)],
-            [Paragraph("GIRO COMERCIAL:", meta_label_style), Paragraph(giro_comercial, meta_val_style)],
-            [Paragraph("SCORE LOCAL:", meta_label_style), Paragraph(f"<b>{datos.get('score', 0)}/100</b> (Calificación Moz)", meta_val_style)],
-            [Paragraph("FUGA DE FACTURACIÓN:", meta_label_style), Paragraph(f"<b>${datos.get('fuga_mensual', 0):,} MXN</b> / mensuales", ParagraphStyle('RedMeta', parent=meta_val_style, textColor=colors.HexColor("#DC2626")))],
-            [Paragraph("FIRMA CONSULTORA:", meta_label_style), Paragraph("LocalRank Consulting", meta_val_style)],
+            [Paragraph("PREPARADO PARA:", meta_label_style), Paragraph(datos_negocio.get('nombre', 'N/A'), meta_val_style)],
+            [Paragraph("GIRO COMERCIAL:", meta_label_style), Paragraph(datos_negocio.get('giro', 'N/A'), meta_val_style)],
+            [Paragraph("SCORE LOCAL:", meta_label_style), Paragraph(f"<b>{datos_negocio['metricas']['score']}/100</b> (Calificación Moz Local)", meta_val_style)],
+            [Paragraph("FUGA DE FACTURACIÓN:", meta_label_style), Paragraph(f"<b>${datos_negocio['metricas']['fuga_mensual']:,} MXN</b> / mensuales", ParagraphStyle('RedMeta', parent=meta_val_style, textColor=colors.HexColor("#DC2626")))],
+            [Paragraph("FIRMA CONSULTORA:", meta_label_style), Paragraph("<b>LocalRank Consulting</b> (Alejandro Trejo)", meta_val_style)],
             [Paragraph("FECHA DE EMISIÓN:", meta_label_style), Paragraph(fecha_actual, meta_val_style)],
         ]
     else:
         tabla_portada_data = [
-            [Paragraph("PREPARADO PARA:", meta_label_style), Paragraph(nombre_negocio, meta_val_style)],
-            [Paragraph("GIRO COMERCIAL:", meta_label_style), Paragraph(giro_comercial, meta_val_style)],
-            [Paragraph("ACCESO OPERATIVO:", meta_label_style), Paragraph("<b>Solución Desbloqueada (Fase de Implementación)</b>", ParagraphStyle('GreenMeta', parent=meta_val_style, textColor=colors.HexColor("#059669")))],
-            [Paragraph("FIRMA CONSULTORA:", meta_label_style), Paragraph("LocalRank Consulting", meta_val_style)],
+            [Paragraph("PREPARADO PARA:", meta_label_style), Paragraph(datos_negocio.get('nombre', 'N/A'), meta_val_style)],
+            [Paragraph("GIRO COMERCIAL:", meta_label_style), Paragraph(datos_negocio.get('giro', 'N/A'), meta_val_style)],
+            [Paragraph("ACTIVOS DE PLAN:", meta_label_style), Paragraph(datos_negocio['metricas']['plan_recomendado'].split(" - ")[0], meta_val_style)],
+            [Paragraph("ESTADO DE ACCESO:", meta_label_style), Paragraph("<b>Solución Desbloqueada (Fase de Implementación)</b>", ParagraphStyle('GreenMeta', parent=meta_val_style, textColor=colors.HexColor("#059669")))],
+            [Paragraph("FIRMA CONSULTORA:", meta_label_style), Paragraph("<b>LocalRank Consulting</b> (Alejandro Trejo)", meta_val_style)],
             [Paragraph("FECHA DE EMISIÓN:", meta_label_style), Paragraph(fecha_actual, meta_val_style)],
         ]
-        
+    
     t_portada = Table(tabla_portada_data, colWidths=[150, 350])
     t_portada.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), bg_panel),
@@ -479,7 +266,7 @@ def generar_pdf_bytes(texto_contenido, tipo):
     story.append(t_portada)
     story.append(PageBreak())
 
-    # --- CUERPO DEL INFORME ---
+    # Procesamiento del cuerpo
     lineas = texto_contenido.split("\n")
     elementos_seccion = []
     
@@ -491,18 +278,18 @@ def generar_pdf_bytes(texto_contenido, tipo):
         linea_sana = linea_strip.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         while "**" in linea_sana:
             linea_sana = linea_sana.replace("**", "<b>", 1).replace("**", "</b>", 1)
-            
+        
         is_header = False
         for selector in ["Sección", "Seccion", "SECCIÓN", "###", "##"]:
-            if linea_sana.startswith(selector) or (linea_sana.isupper() and len(linea_sana) < 45):
+            if linea_sana.startswith(selector) or (linea_sana.isupper() and len(linea_sana) < 45 and any(kw in linea_sana for kw in ["RESEÑA", "FOTO", "SEO", "CATEGOR", "DIAGNÓSTICO", "DIAGNOSTICO", "PROPUESTA", "CONVERSIÓN", "INACCIÓN", "PLAN", "ENTREGABLE", "DOSSIER", "SOLUCIÓN"])):
                 is_header = True
                 break
-                
+        
         if is_header:
             if elementos_seccion:
                 story.append(KeepTogether(elementos_seccion))
                 elementos_seccion = []
-                
+            
             titulo_limpio = linea_sana.replace("#", "").strip()
             elementos_seccion.append(Spacer(1, 10))
             elementos_seccion.append(Paragraph(titulo_limpio, section_heading))
@@ -536,65 +323,300 @@ def generar_pdf_bytes(texto_contenido, tipo):
         canvas.setStrokeColor(border_light)
         canvas.setLineWidth(0.5)
         canvas.line(45, 42, letter[0] - 45, 42)
-        canvas.drawString(45, 28, "LocalRank Consulting | Plan de Evolución Local CDMX 2026")
+        canvas.drawString(45, 28, "LocalRank Consulting | Plan Estratégico de Evolución Local CDMX 2026")
         page_num = canvas.getPageNumber()
         canvas.drawRightString(letter[0] - 45, 28, f"Página {page_num}")
         canvas.restoreState()
 
     doc.build(story, onFirstPage=add_page_number, onLaterPages=add_page_number)
-    pdf_bytes = buffer.getvalue()
-    buffer.close()
-    return pdf_bytes
+    buffer.seek(0)
+    return buffer.getvalue()
 
-st.markdown("---")
-st.subheader("🛠️ Panel de Ejecución y Gestión de Reportes")
+# --- INTERFAZ WEB DE STREAMLIT ---
+st.title("🎯 LocalRank Consulting")
+st.subheader("G-Maps Local SEO Auditor & Diagnostic Tool")
 
-col_btn1, col_btn2 = st.columns([1, 1])
+# Panel lateral de Configuración de API Key
+with st.sidebar:
+    st.header("⚙️ Configuración")
+    api_key_input = st.text_input("Gemini API Key:", type="password", value="")
+    st.info("La API Key ingresada se mantendrá segura y protegida en tu sesión local.")
 
-with col_btn1:
-    st.markdown("### Fase 1: Auditoría de Preventa")
-    if st.button("Lanzar Análisis de Preventa 🚀", use_container_width=True):
-        ejecutar_consulta_ia("auditoria")
-        
-    # Editor interactivo para preventa
-    texto_editado_auditoria = st.text_area(
-        "Edita el reporte de preventa aquí antes de exportarlo:",
-        value=st.session_state.reporte_auditoria,
-        height=350,
-        key="editor_auditoria"
-    )
-    st.session_state.reporte_auditoria = texto_editado_auditoria
+# --- FORMULARIO IZQUIERDO ---
+col_form, col_res = st.columns([45, 55])
+
+with col_form:
+    st.markdown("### 1. Información General")
+    nombre_negocio = st.text_input("Nombre del Negocio o Enlace de Google Maps:", placeholder="Ej: Dental Center Guadalajara")
     
-    if st.session_state.reporte_auditoria:
-        pdf_preventa_bytes = generar_pdf_bytes(st.session_state.reporte_auditoria, "auditoria")
-        st.download_button(
-            label="Descargar PDF de Preventa 🔴",
-            data=pdf_preventa_bytes,
-            file_name=f"LocalRank_Preventa_{nombre_negocio.replace(' ', '_')}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
-
-with col_btn2:
-    st.markdown("### Fase 2: Entregables de Posventa")
-    if st.button("Lanzar Generación de Activos 🟢", use_container_width=True):
-        ejecutar_consulta_ia("entregables")
-        
-    # Editor interactivo para posventa
-    texto_editado_entregables = st.text_area(
-        "Edita el dossier de posventa aquí antes de exportarlo:",
-        value=st.session_state.reporte_entregables,
-        height=350,
-        key="editor_entregables"
+    giro_comercial = st.selectbox(
+        "Giro Comercial del Establecimiento:",
+        [
+            "Salud (Clínicas, Consultorios, Hospitales)",
+            "Gastronomía (Restaurantes, Cafeterías, Bares)",
+            "Servicios Profesionales B2B (Corporativos, Despachos)",
+            "Ocio, Turismo y Entretenimiento (Atracciones, Hoteles)"
+        ]
     )
-    st.session_state.reporte_entregables = texto_editado_entregables
     
-    if st.session_state.reporte_entregables:
-        pdf_posventa_bytes = generar_pdf_bytes(st.session_state.reporte_entregables, "entregables")
-        st.download_button(
-            label="Descargar PDF de Posventa 🟢",
-            data=pdf_posventa_bytes,
-            file_name=f"LocalRank_Entregables_{nombre_negocio.replace(' ', '_')}.pdf",
-            mime="application/pdf",
-            use_container_width=True
+    cat_principal = st.text_input("Categoría Principal de Maps:", placeholder="Ej: Clínica dental")
+    cat_secundarias = st.text_input("Subcategorías actuales (separadas por comas):", placeholder="Ej: Dentista, Ortodoncista")
+
+    st.markdown("### 2. Ecuación Financiera")
+    col_busq, col_tick = st.columns(2)
+    with col_busq:
+        busquedas_est = st.number_input("Búsquedas Mensuales (Zona):", min_value=1, value=1500, step=100)
+    with col_tick:
+        ticket_prom = st.number_input("Ticket Promedio ($MXN):", min_value=1.0, value=1200.0, step=50.0)
+
+    # Diagnóstico de Listas de Verificación
+    st.markdown("### 3. Diagnóstico de Captación (CTM)")
+    
+    with st.expander("Bloque 1: Propiedad y Visibilidad"):
+        propiedad_ficha = st.selectbox("Propiedad de la Ficha:", ["Reclamada y Verificada", "Sin reclamar / Abandonada"])
+        consistencia_nap = st.selectbox("Consistencia NAP (Nombre/Dir/Tel):", ["Consistente", "Datos distintos en Web/Ficha"])
+        pin_ubicacion = st.selectbox("Pin de Ubicación Geográfica:", ["Correcto (En la entrada)", "Desplazado / Incorrecto"])
+        horarios_reales = st.selectbox("Horarios y Días Festivos:", ["Actualizados", "Obsoletos / Sin festivos"])
+
+    with st.expander("Bloque 2: Arquitectura SEO"):
+        cat_optimizacion = st.selectbox("Optimización de Categorías:", ["Correctas y específicas", "Muy genéricas / Erróneas / Faltantes"])
+        nombre_spam = st.selectbox("Nombre Comercial Limpio:", ["Limpio y legal (Sin Spam)", "Spam / Keyword stuffing"])
+        catalogo_servicios = st.selectbox("Catálogo de Servicios:", ["Completo y redactado", "Vacío / Solo títulos sin descripción"])
+
+    with st.expander("Bloque 3: Canales de Conversión"):
+        chat_nativo = st.selectbox("Botón de Chat Nativo GBP:", ["Activado y ágil", "Desactivado / Abandonado"])
+        contacto_rapido = st.selectbox("Enlace de Contacto Rápido (WhatsApp/Web):", ["Enlace optimizado", "Link roto / No tiene"])
+        faqs_config = st.selectbox("Preguntas Frecuentes (FAQs):", ["Configuradas (3-5 FAQs)", "Vacío / Abandonado"])
+
+    with st.expander("Bloque 4: Prominencia"):
+        calidad_visual = st.selectbox("Calidad Visual Reciente:", ["Actualizadas y profesionales", "Fotos viejas / De stock"])
+        frecuencia_resenas = st.selectbox("Frecuencia de Reseñas 5 Estrellas:", ["Flujo constante activo", "Sin reseñas recientes / Estancado"])
+        seo_respuestas = st.selectbox("SEO en Respuestas de Reseñas:", ["Respuestas con SEO local", "\"Gracias\" plano / Sin responder"])
+        gestion_crisis = st.selectbox("Gestión de Crisis (Reseñas 1 Estrella):", ["Gestión profesional y comercial", "Respuestas reactivas / Ignoradas"])
+
+    with st.expander("Inventario de Fotos (Cantidades)"):
+        f_interior = st.number_input("Fotos de Interior:", min_value=0, value=0)
+        f_exterior = st.number_input("Fotos de Exterior (Fachada):", min_value=0, value=0)
+        f_equipo = st.number_input("Fotos de Equipo / Personal:", min_value=0, value=0)
+        f_productos = st.number_input("Fotos de Productos / Servicios:", min_value=0, value=0)
+        f_logo = st.number_input("Logotipo / Portada configurados (0 o 1):", min_value=0, max_value=1, value=0)
+
+    st.markdown("### 4. Entradas Contextuales")
+    desc_actual = st.text_area("Descripción Actual del Perfil (Si tiene):")
+    servicios_actual = st.text_area("Servicios/Atributos Listados Actualmente:")
+    resenas_actual = st.text_area("Reseñas Recientes (Para análisis semántico):", value="Cliente 1: Excelente servicio, el dentista fue muy paciente con mi tratamiento de ortodoncia.\nCliente 2: Buena atención pero tardaron un poco en atenderme a pesar de tener cita.")
+
+    # --- BOTONES DE GENERACIÓN ---
+    col_btn1, col_btn2 = st.columns(2)
+    
+    with col_btn1:
+        generar_auditoria_btn = st.button("1. Generar Diagnóstico (Preventa)", use_container_width=True)
+    with col_btn2:
+        generar_entregables_btn = st.button("2. Generar Entregables (Posventa)", use_container_width=True)
+
+# --- PANEL DE RESULTADOS DERECHO ---
+with col_res:
+    tab1, tab2 = st.tabs(["📊 1. Auditoría Comercial (Preventa)", "🛠️ 2. Entregables Técnicos (Posventa)"])
+    
+    # Recopilar variables
+    fotos = {"interior": f_interior, "exterior": f_exterior, "equipo": f_equipo, "productos": f_productos, "logo_portada": f_logo}
+    diagnostico = {
+        "propiedad": propiedad_ficha, "nap": consistencia_nap, "pin": pin_ubicacion, "horarios": horarios_reales,
+        "categoria": cat_optimizacion, "nombre": nombre_spam, "servicios": catalogo_servicios,
+        "chat": chat_nativo, "contacto": contacto_rapido, "faqs": faqs_config,
+        "calidad": calidad_visual, "frecuencia": frecuencia_resenas, "seo_respuestas": seo_respuestas, "crisis": gestion_crisis
+    }
+
+    # --- ACCIÓN GENERAR AUDITORÍA (PREVENTA) ---
+    if generar_auditoria_btn:
+        if not api_key_input:
+            st.error("Por favor, ingresa tu API Key en la barra lateral.")
+        else:
+            # Cálculo de variables locales
+            metricas = calcular_metricas(diagnostico, fotos, busquedas_est, ticket_prom)
+            st.session_state.datos_negocio = {
+                "nombre": nombre_negocio,
+                "giro": giro_comercial,
+                "categoria_p": cat_principal,
+                "categorias_s": cat_secundarias,
+                "fotos": fotos,
+                "metricas": metricas
+            }
+            
+            # Silenciado de cualquier mención a "Gemini" o IA
+            with st.spinner(""):
+                try:
+                    client = genai.Client(api_key=api_key_input)
+                    prompt_diagnostico = "\n".join([f"- {k.title()}: {v}" for k, v in diagnostico.items()])
+                    
+                    prompt = f"""
+Actúa como un Consultor de SEO Local Senior y Socio Director de la firma de posicionamiento 'LocalRank Consulting'.
+Vas a redactar un informe de Diagnóstico de Visibilidad Comercial para el negocio '{nombre_negocio}' (Giro: {giro_comercial}) en el mercado mexicano.
+
+REGLA DE NEGOCIO CRÍTICA: No entregues NINGÚN activo copiable listo de inmediato (no redactes descripciones completas, ni FAQs completas, ni plantillas de respuestas exactas). Esto es preventa. El cliente debe pagar para obtener las soluciones de implementación. Limítate a auditar, justificar y demostrar la pérdida económica por inacción.
+
+DATOS DE ENTRADA:
+- Nombre: {nombre_negocio}
+- Categoría Principal: {cat_principal}
+- Categorías Secundarias: {cat_secundarias}
+- Descripción Actual: {desc_actual}
+
+DIAGNÓSTICO BASE DE LA FICHA:
+{prompt_diagnostico}
+
+MÉTRICAS CLAVE GENERADAS POR NUESTRO SISTEMA:
+- Score de Optimización Moz Local: {metricas['score']}/100 
+- Fuga Financiera Mensual Calculada: ${metricas['fuga_mensual']:,} MXN mensuales.
+- Plan Recomendado: {metricas['plan_recomendado']}
+
+-----------------
+CONSTRUYE EL INFORME DE PREVENTA CON LAS SIGUIENTES SECCIONES.
+Usa los títulos idénticos marcados con 'Sección X:' para permitir la segmentación automática del PDF.
+
+Sección 1: Resumen Ejecutivo y Diagnóstico Global
+- Presenta el diagnóstico formal de nuestra firma.
+- Expone el Score de Optimización de {metricas['score']}/100. Desglosa los pilares algorítmicos.
+- Detalla los fallos críticos de visibilidad detectados y explica cómo afectan la confianza de los consumidores.
+
+Sección 2: El Costo de la Inacción (Pérdida Financiera)
+- Explica de forma comercial la ecuación de ingresos proyectada para Google Maps en México: IP = VP * TA * TC * VT.
+- Demuestra que operar con un perfil desoptimizado causa una fuga de facturación mensual estimada de ${metricas['fuga_mensual']:,} MXN que está absorbiendo la competencia. Este bloque debe ser directo y de alto impacto persuasivo.
+
+Sección 3: Auditoría y Gaps de Relevancia (Categorías)
+- Valida la categoría principal '{cat_principal}' en base al giro comercial.
+- Lista un mínimo de 5 subcategorías ideales recomendadas para este nicho.
+
+Sección 4: Diagnóstico Visual e Inventario de Fotos
+- Analiza las fotos declaradas. Explica el impacto psicológico y algorítmico de tener imágenes reales frente a fotos de stock.
+
+Sección 5: Fugas Conversionales y Canales Activos
+- Analiza las deficiencias detectadas en los canales activos de contacto (Chat, WhatsApp, FAQs abandonadas). Explica cuántos prospectos se pierden por no tener activos estos embudos.
+
+Sección 6: Propuesta de Solución LocalRank Consulting
+- Despliega formalmente la cotización de servicios profesionales de Alejandro Trejo:
+  * Plan Básico - Fundamentos y SEO Local ($3,500 MXN)
+  * Plan Avanzado - Implementación e Infraestructura ($6,500 MXN)
+  * Plan Recurrente - Gestión y Blindaje Mensual ($4,500 MXN / mes)
+- Argumenta firmemente por qué el '{metricas['plan_recomendado']}' es la solución inmediata ideal.
+
+IMPORTANTE: Redacta en un tono impecable, dinámico, asertivo y directo en español. Evita redundancias de estilo como "es vital, ya que...".
+"""
+                    response = client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=prompt
+                    )
+                    st.session_state.reporte_auditoria = response.text
+                except Exception as e:
+                    st.error(f"Error durante el procesamiento: {e}")
+
+    # --- ACCIÓN GENERAR ENTREGABLES (POSVENTA) ---
+    if generar_entregables_btn:
+        if not api_key_input:
+            st.error("Por favor, ingresa tu API Key en la barra lateral.")
+        else:
+            metricas = calcular_metricas(diagnostico, fotos, busquedas_est, ticket_prom)
+            st.session_state.datos_negocio = {
+                "nombre": nombre_negocio,
+                "giro": giro_comercial,
+                "categoria_p": cat_principal,
+                "categorias_s": cat_secundarias,
+                "fotos": fotos,
+                "metricas": metricas
+            }
+            
+            with st.spinner(""):
+                try:
+                    client = genai.Client(api_key=api_key_input)
+                    prompt = f"""
+Actúa como un Consultor de SEO Local Senior de la firma 'LocalRank Consulting'.
+Vas a redactar el Dossier Técnico de Entregables de Implementación para el negocio '{nombre_negocio}' (Giro: {giro_comercial}). Este es un documento puramente operativo que el cliente obtiene tras haber pagado.
+
+Debes entregar las soluciones exactas optimizadas de forma directa, listas para que el cliente o tú las copien e implementen de inmediato en la ficha de Google Business Profile.
+
+DATOS DE ENTRADA:
+- Nombre: {nombre_negocio}
+- Categoría Principal: {cat_principal}
+- Categorías Secundarias: {cat_secundarias}
+
+RESEÑAS DEL CLIENTE PARA ANÁLISIS SEMÁNTICO:
+{resenas_actual}
+
+-----------------
+CONSTRUYE EL INFORME DE POSVENTA CON LAS SIGUIENTES SECCIONES.
+Usa los títulos idénticos marcados con 'Sección X:' para permitir la segmentación automática del PDF.
+
+Sección 1: Propuesta de Descripción de Alta Conversión
+- Redacta una descripción comercial completamente nueva para Google Maps, con un límite estricto de 750 caracteres, lista para copiar y pegar de inmediato.
+- Debe incluir la categoría principal y geolocalización natural de manera fluida en las primeras dos líneas (primeros 150 caracteres). Tono alineado al giro {giro_comercial}.
+
+Sección 2: Plan Técnico de Fotos Prioritarias
+- Detalla un listado accionable con 5 tomas fotográficas estratégicas que deben realizarse y subirse de forma inmediata al perfil de Google Business Profile.
+
+Sección 3: Enlaces de Conversión Activa y WhatsApp
+- Genera la propuesta exacta para los botones de contacto rápido.
+- Redacta el mensaje parametrizado ideal para el Enlace de WhatsApp del negocio que dispare la intención de compra.
+- Detalla la guía operativa para activar el chat nativo de Google Business Profile.
+
+Sección 4: Despliegue de Preguntas Frecuentes (FAQs) Nativas
+- Redacta exactamente 3 Preguntas Frecuentes (FAQs) con sus respuestas ideales optimizadas para el nicho.
+
+Sección 5: Módulo de Respuestas de Reseñas (10 Plantillas SEO)
+- En base a las opiniones de clientes provistas, genera exactamente 10 respuestas modelo de alta calidad (5 positivas de 5 estrellas agradeciendo, 3 de crisis de 1 estrella, 2 de información neutral).
+
+Sección 6: Script de Captación Automatizada de Opiniones
+- Redacta el script de texto exacto para WhatsApp o Correo electrónico que el negocio debe enviar a sus clientes para incentivar el flujo de opiniones de 5 estrellas de manera orgánica.
+
+Sección 7: Guía Técnica de Integración Conversacional y Citas
+- Detalla la guía técnica de configuración de agenda automatizada (TidyCal o similar), incluyendo buffer de tiempo recomendado, flujos de recordatorio y de correo electrónico.
+
+IMPORTANTE: Escribe directamente el código de las soluciones listas para ser aplicadas en español. Mantén el estilo corporativo y directo de la firma.
+"""
+                    response = client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=prompt
+                    )
+                    st.session_state.reporte_entregables = response.text
+                except Exception as e:
+                    st.error(f"Error durante el procesamiento: {e}")
+
+    # --- RENDERIZADO DE LA PESTAÑA 1 (AUDITORÍA PREVENTA) ---
+    with tab1:
+        # Se elimina el condicional de aviso estático. El editor carga directamente el estado de sesión actual.
+        editor_auditoria = st.text_area(
+            "Editor de Auditoría (Preventa):",
+            value=st.session_state.reporte_auditoria,
+            height=500,
+            key="area_auditoria"
         )
+        # Sincronizar el valor editado por el usuario
+        st.session_state.reporte_auditoria = editor_auditoria
+        
+        if st.session_state.reporte_auditoria:
+            pdf_data = generar_pdf_bytes(st.session_state.reporte_auditoria, st.session_state.datos_negocio, "auditoria")
+            st.download_button(
+                label="Descargar PDF de Preventa",
+                data=pdf_data,
+                file_name=f"Auditoria_Preventa_LocalRank_{nombre_negocio.replace(' ', '_')}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+
+    # --- RENDERIZADO DE LA PESTAÑA 2 (ENTREGABLES POSVENTA) ---
+    with tab2:
+        editor_entregables = st.text_area(
+            "Editor de Entregables (Posventa):",
+            value=st.session_state.reporte_entregables,
+            height=500,
+            key="area_entregables"
+        )
+        st.session_state.reporte_entregables = editor_entregables
+        
+        if st.session_state.reporte_entregables:
+            pdf_data_post = generar_pdf_bytes(st.session_state.reporte_entregables, st.session_state.datos_negocio, "entregables")
+            st.download_button(
+                label="Descargar PDF de Posventa",
+                data=pdf_data_post,
+                file_name=f"Entregables_Posventa_LocalRank_{nombre_negocio.replace(' ', '_')}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
