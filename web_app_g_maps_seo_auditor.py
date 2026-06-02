@@ -1,5 +1,6 @@
 import os
 import io
+import time
 import datetime
 import streamlit as st
 
@@ -19,7 +20,6 @@ try:
 except ImportError:
     st.error("Falta la librería 'reportlab'. Por favor, asegúrate de que esté en tu archivo requirements.txt.")
 
-# Configuración de página de Streamlit para Móvil y Desktop
 st.set_page_config(
     page_title="LocalRank Consulting - G-Maps SEO Auditor",
     page_icon="🎯",
@@ -27,11 +27,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Estilos CSS personalizados para un look premium y oscuro en móviles (S23 Ultra)
+# Estilos CSS premium para optimizar la interfaz en el Samsung S23 Ultra
 st.markdown("""
     <style>
-        .reportview-container {
-            background: #0B0B0F;
+        div[data-testid="stAppViewContainer"] {
+            background-color: #0B0B0F !important;
         }
         .stButton>button {
             border-radius: 8px;
@@ -43,26 +43,42 @@ st.markdown("""
             border: 1px solid #1F2937 !important;
             border-radius: 8px !important;
         }
-        /* Estilos específicos para unificar editores */
         .stTextArea textarea {
-            background-color: #0C0C0F !important;
-            color: #F3F4F6 !important;
             font-family: 'Consolas', monospace !important;
             font-size: 14px !important;
-            border: 1px solid #1F2937 !important;
         }
     </style>
 """, unsafe_allow_html=True)
 
-# --- INICIALIZACIÓN DE VARIABLES DE SESIÓN ---
+# Mensajes iniciales instructivos de sistema
+placeholder_auditoria = ">>> Haz clic en el botón '1. Generar Diagnóstico (Preventa)' para procesar el score y el informe comercial..."
+placeholder_entregables = ">>> Haz clic en el botón '2. Generar Entregables (Posventa)' para procesar descripciones, FAQs y respuestas con SEO..."
+
 if "reporte_auditoria" not in st.session_state:
-    st.session_state.reporte_auditoria = ""
+    st.session_state.reporte_auditoria = placeholder_auditoria
 if "reporte_entregables" not in st.session_state:
-    st.session_state.reporte_entregables = ""
+    st.session_state.reporte_entregables = placeholder_entregables
 if "datos_negocio" not in st.session_state:
     st.session_state.datos_negocio = {}
 
-# --- LÓGICA DE CÁLCULO CIENTÍFICO ---
+def generar_con_reintentos(client, prompt, model_name='gemini-2.5-flash'):
+    """
+    Realiza la llamada de generación de contenido aplicando Exponential Backoff.
+    Intenta hasta 5 veces con retrasos de 1s, 2s, 4s, 8s, 16s ante fallos del servidor.
+    """
+    intentos = [1, 2, 4, 8, 16]
+    for i, delay in enumerate(intentos):
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt
+            )
+            return response.text
+        except Exception as e:
+            if i == len(intentos) - 1:
+                raise e
+            time.sleep(delay)
+
 def calcular_metricas(checklist, fotos, búsquedas, ticket):
     score_gbp = 0
     if checklist["propiedad"] == "Reclamada y Verificada": score_gbp += 8
@@ -92,7 +108,7 @@ def calcular_metricas(checklist, fotos, búsquedas, ticket):
     score_total = score_gbp + score_onpage + score_resenas + score_comportamiento + score_fotos
     
     # Ecuación de Costo de Inacción
-    tc = 0.30  # Conversión en México
+    tc = 0.30  # Conversión promedio en México
     ingresos_optimo = búsquedas * 0.06 * tc * ticket
     ingresos_actuales = búsquedas * 0.015 * tc * ticket
     fuga_mensual = ingresos_optimo - ingresos_actuales
@@ -230,7 +246,6 @@ def generar_pdf_bytes(texto_contenido, datos_negocio, tipo):
     story.append(Spacer(1, 100))
     
     fecha_actual = datetime.datetime.now().strftime("%d de %B de %Y")
-    fotos_info = f"Interior: {datos_negocio['fotos']['interior']} | Exterior: {datos_negocio['fotos']['exterior']} | Equipo: {datos_negocio['fotos']['equipo']} | Prod/Serv: {datos_negocio['fotos']['productos']} | Logo: {datos_negocio['fotos']['logo_portada']}"
     
     if tipo == "auditoria":
         tabla_portada_data = [
@@ -266,7 +281,7 @@ def generar_pdf_bytes(texto_contenido, datos_negocio, tipo):
     story.append(t_portada)
     story.append(PageBreak())
 
-    # Procesamiento del cuerpo
+    # Procesamiento del cuerpo del reporte
     lineas = texto_contenido.split("\n")
     elementos_seccion = []
     
@@ -332,7 +347,6 @@ def generar_pdf_bytes(texto_contenido, datos_negocio, tipo):
     buffer.seek(0)
     return buffer.getvalue()
 
-# --- INTERFAZ WEB DE STREAMLIT ---
 st.title("🎯 LocalRank Consulting")
 st.subheader("G-Maps Local SEO Auditor & Diagnostic Tool")
 
@@ -414,11 +428,10 @@ with col_form:
     with col_btn2:
         generar_entregables_btn = st.button("2. Generar Entregables (Posventa)", use_container_width=True)
 
-# --- PANEL DE RESULTADOS DERECHO ---
 with col_res:
     tab1, tab2 = st.tabs(["📊 1. Auditoría Comercial (Preventa)", "🛠️ 2. Entregables Técnicos (Posventa)"])
     
-    # Recopilar variables
+    # Recopilar variables del formulario
     fotos = {"interior": f_interior, "exterior": f_exterior, "equipo": f_equipo, "productos": f_productos, "logo_portada": f_logo}
     diagnostico = {
         "propiedad": propiedad_ficha, "nap": consistencia_nap, "pin": pin_ubicacion, "horarios": horarios_reales,
@@ -443,7 +456,6 @@ with col_res:
                 "metricas": metricas
             }
             
-            # Silenciado de cualquier mención a "Gemini" o IA
             with st.spinner(""):
                 try:
                     client = genai.Client(api_key=api_key_input)
@@ -501,13 +513,11 @@ Sección 6: Propuesta de Solución LocalRank Consulting
 
 IMPORTANTE: Redacta en un tono impecable, dinámico, asertivo y directo en español. Evita redundancias de estilo como "es vital, ya que...".
 """
-                    response = client.models.generate_content(
-                        model='gemini-2.5-flash',
-                        contents=prompt
-                    )
-                    st.session_state.reporte_auditoria = response.text
+                    resultado_texto = generar_con_reintentos(client, prompt)
+                    # Sincronizamos de forma directa y bidireccional el estado del widget
+                    st.session_state.reporte_auditoria = resultado_texto
                 except Exception as e:
-                    st.error(f"Error durante el procesamiento: {e}")
+                    st.error(f"Error durante el procesamiento (503 / Límite de Cuota): Por favor, espera un momento y vuelve a intentarlo. Detalles: {e}")
 
     # --- ACCIÓN GENERAR ENTREGABLES (POSVENTA) ---
     if generar_entregables_btn:
@@ -566,32 +576,28 @@ Sección 5: Módulo de Respuestas de Reseñas (10 Plantillas SEO)
 Sección 6: Script de Captación Automatizada de Opiniones
 - Redacta el script de texto exacto para WhatsApp o Correo electrónico que el negocio debe enviar a sus clientes para incentivar el flujo de opiniones de 5 estrellas de manera orgánica.
 
-Sección 7: Guía Técnica de Integración Conversacional y Citas
+Sección 7: Guía Técnico de Integración Conversacional y Citas
 - Detalla la guía técnica de configuración de agenda automatizada (TidyCal o similar), incluyendo buffer de tiempo recomendado, flujos de recordatorio y de correo electrónico.
 
 IMPORTANTE: Escribe directamente el código de las soluciones listas para ser aplicadas en español. Mantén el estilo corporativo y directo de la firma.
 """
-                    response = client.models.generate_content(
-                        model='gemini-2.5-flash',
-                        contents=prompt
-                    )
-                    st.session_state.reporte_entregables = response.text
+                    resultado_texto = generar_con_reintentos(client, prompt)
+                    # Sincronizamos de forma directa y bidireccional el estado del widget
+                    st.session_state.reporte_entregables = resultado_texto
                 except Exception as e:
-                    st.error(f"Error durante el procesamiento: {e}")
+                    st.error(f"Error durante el procesamiento (503 / Límite de Cuota): Por favor, espera un momento y vuelve a intentarlo. Detalles: {e}")
 
     # --- RENDERIZADO DE LA PESTAÑA 1 (AUDITORÍA PREVENTA) ---
     with tab1:
-        # Se elimina el condicional de aviso estático. El editor carga directamente el estado de sesión actual.
-        editor_auditoria = st.text_area(
+        # st.text_area vinculado de forma bidireccional e inquebrantable a st.session_state.reporte_auditoria
+        st.text_area(
             "Editor de Auditoría (Preventa):",
-            value=st.session_state.reporte_auditoria,
-            height=500,
-            key="area_auditoria"
+            key="reporte_auditoria",
+            height=500
         )
-        # Sincronizar el valor editado por el usuario
-        st.session_state.reporte_auditoria = editor_auditoria
         
-        if st.session_state.reporte_auditoria:
+        # El botón de descarga solo se habilitará cuando tengamos texto real autogenerado (no el placeholder inicial)
+        if st.session_state.reporte_auditoria and not st.session_state.reporte_auditoria.startswith(">>>"):
             pdf_data = generar_pdf_bytes(st.session_state.reporte_auditoria, st.session_state.datos_negocio, "auditoria")
             st.download_button(
                 label="Descargar PDF de Preventa",
@@ -603,15 +609,15 @@ IMPORTANTE: Escribe directamente el código de las soluciones listas para ser ap
 
     # --- RENDERIZADO DE LA PESTAÑA 2 (ENTREGABLES POSVENTA) ---
     with tab2:
-        editor_entregables = st.text_area(
+        # st.text_area vinculado de forma bidireccional e inquebrantable a st.session_state.reporte_entregables
+        st.text_area(
             "Editor de Entregables (Posventa):",
-            value=st.session_state.reporte_entregables,
-            height=500,
-            key="area_entregables"
+            key="reporte_entregables",
+            height=500
         )
-        st.session_state.reporte_entregables = editor_entregables
         
-        if st.session_state.reporte_entregables:
+        # El botón de descarga solo se habilitará cuando tengamos texto real autogenerado (no el placeholder inicial)
+        if st.session_state.reporte_entregables and not st.session_state.reporte_entregables.startswith(">>>"):
             pdf_data_post = generar_pdf_bytes(st.session_state.reporte_entregables, st.session_state.datos_negocio, "entregables")
             st.download_button(
                 label="Descargar PDF de Posventa",
